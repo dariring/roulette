@@ -90,7 +90,8 @@ export class RouletteRenderer {
       alpha: false,
     }) as CanvasRenderingContext2D;
 
-    document.body.appendChild(this._canvas);
+    document.getElementById('canvasWrap')!.prepend(this._canvas);
+
 
     const resizing = (entries?: ResizeObserverEntry[]) => {
       const realSize = entries ? entries[0].contentRect : this._canvas.getBoundingClientRect();
