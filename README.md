@@ -1,24 +1,33 @@
-# Marble roulette
+# Marble Roulette
 
-This is a lucky draw by dropping marbles.
+물리 엔진(Box2D) 기반 구슬 추첨기입니다.
 
-[Demo]( https://lazygyu.github.io/roulette )
+이 프로젝트는 [lazygyu/roulette](https://github.com/lazygyu/roulette)를 기반으로 광고 요소를 제거하고 Vite로 번들링 환경을 리메이크한 버전입니다.
 
-# Requirements
+## 기술 스택
 
-- Typescript
-- Parcel
+- TypeScript
+- Vite
+- SCSS
 - box2d-wasm
 
-# Development
+## 실행 및 빌드
 
-```shell
-> yarn
-> yarn dev
+### 의존성 설치
+```bash
+npm install
 ```
 
-# Build
-
-```shell
-> yarn build
+### 개발 서버 실행
+```bash
+npm run dev
 ```
+
+### 프로덕션 빌드
+```bash
+npm run build
+```
+
+## 라이선스
+
+MIT License (원작자: [lazygyu](https://github.com/lazygyu))

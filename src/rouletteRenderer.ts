@@ -1,12 +1,9 @@
-import { type AdOverlayMode, type AdOverlayState, type AdRect, drawAdOverlay } from './adRenderer';
 import type { Camera } from './camera';
 import { canvasHeight, canvasWidth, initialZoom, Themes, winnerAreaHeight } from './data/constants';
 import type { StageDef } from './data/maps';
 import type { GameObject } from './gameObject';
-import { KeywordService } from './keywordService';
 import type { Marble } from './marble';
 import type { ParticleManager } from './particleManager';
-import type { RoundAd } from './types/Ad.type';
 import type { ColorTheme } from './types/ColorTheme';
 import type { MapEntityState } from './types/MapEntity.type';
 import type { VectorLike } from './types/VectorLike';
@@ -29,12 +26,6 @@ export type RenderParameters = {
 const MAX_DISPLAY_WIDTH = 1920;
 const WINNER_TEXT_OFFSET = 30;
 
-export type AdHit = { type: 'close' } | { type: 'link'; url: string };
-
-function inRect(rect: AdRect | undefined, x: number, y: number): boolean {
-  return !!rect && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
-}
-
 export class RouletteRenderer {
   protected _canvas!: HTMLCanvasElement;
   protected _sceneCanvas!: HTMLCanvasElement;
@@ -44,18 +35,8 @@ export class RouletteRenderer {
 
   protected _images: { [key: string]: HTMLImageElement } = {};
   protected _theme: ColorTheme = Themes.dark;
-  private _ad: RoundAd | null = null;
-  private _adImageCache: Map<string, HTMLImageElement> = new Map();
-  private _adOverlay: AdOverlayState | null = null;
-  protected _keywordService: KeywordService;
 
-  constructor() {
-    this._keywordService = this.createKeywordService();
-  }
-
-  protected createKeywordService(): KeywordService {
-    return new KeywordService();
-  }
+  constructor() {}
 
   get width() {
     return this._sceneCanvas.width;
@@ -74,7 +55,7 @@ export class RouletteRenderer {
   }
 
   async init() {
-    await Promise.all([this._load(), this._keywordService.init()]);
+    await this._load();
 
     this._canvas = document.createElement('canvas');
     this._canvas.width = canvasWidth;
@@ -98,49 +79,41 @@ export class RouletteRenderer {
 
       const width = Math.max(realSize.width / 2, 640);
       const height = (width / realSize.width) * realSize.height;
-      this._sceneCanvas.width = width;
-      this._sceneCanvas.height = height;
+      this._sceneCanvas.width = Math.min(width, MAX_DISPLAY_WIDTH);
+      this._sceneCanvas.height = Math.min(height, (MAX_DISPLAY_WIDTH / realSize.width) * realSize.height);
       this.sizeFactor = width / realSize.width;
-
-      const displayWidth = Math.min(realSize.width, MAX_DISPLAY_WIDTH);
-      this._canvas.width = displayWidth;
-      this._canvas.height = (displayWidth / realSize.width) * realSize.height;
     };
 
     const resizeObserver = new ResizeObserver(resizing);
-
     resizeObserver.observe(this._canvas);
     resizing();
   }
 
   private async _loadImage(url: string): Promise<HTMLImageElement> {
-    return new Promise((rs) => {
-      const img = new Image();
+    const img = new Image();
+    img.src = url;
+    return new Promise((resolve) => {
       img.addEventListener('load', () => {
-        rs(img);
+        resolve(img);
       });
-      img.src = url;
     });
   }
 
   private async _load(): Promise<void> {
     const loadPromises = [
-      { name: '챔루', imgUrl: new URL('../assets/images/chamru.png', import.meta.url) },
-      { name: '쿠빈', imgUrl: new URL('../assets/images/kubin.png', import.meta.url) },
-      { name: '꽉변', imgUrl: new URL('../assets/images/kkwak.png', import.meta.url) },
-      { name: '꽉변호사', imgUrl: new URL('../assets/images/kkwak.png', import.meta.url) },
-      { name: '꽉 변호사', imgUrl: new URL('../assets/images/kkwak.png', import.meta.url) },
-      { name: '주누피', imgUrl: new URL('../assets/images/junyoop.png', import.meta.url) },
-      { name: '왈도쿤', imgUrl: new URL('../assets/images/waldokun.png', import.meta.url) },
-    ].map(({ name, imgUrl }) => {
-      return (async () => {
-        this._images[name] = await this._loadImage(imgUrl.toString());
-      })();
+      'chamru',
+      'junyoop',
+      'kkwak',
+      'kubin',
+      'waldokun',
+    ].map(async (name) => {
+      const imgUrl = new URL(`../assets/images/${name}.png`, import.meta.url);
+      this._images[name] = await this._loadImage(imgUrl.toString());
     });
 
     loadPromises.push(
       (async () => {
-        await this._loadImage(new URL('../assets/images/ff.svg', import.meta.url).toString());
+        this._images.ff = await this._loadImage(new URL('../assets/images/ff.svg', import.meta.url).toString());
       })()
     );
 
@@ -148,116 +121,11 @@ export class RouletteRenderer {
   }
 
   private getMarbleImage(name: string): CanvasImageSource | undefined {
-    // Priority 1: Hardcoded images
-    if (this._images[name]) {
-      return this._images[name];
-    }
-    // Priority 2: Keyword sprites from API
-    return this._keywordService.getSprite(name);
+    return this._images[name];
   }
 
   protected onBeforeEntities(): void {}
   protected onAfterScene(): void {}
-
-  setAd(ad: RoundAd | null): void {
-    this._ad = ad;
-    if (!ad) return;
-    this.preloadAdImages([...Object.values(ad.creatives), ad.qrImage]);
-  }
-
-  /** 소재를 미리 받아둔다. 여기서 만든 엘리먼트를 나중에 그대로 그리므로 캐시 헤더와 무관하게 즉시 뜬다 */
-  preloadAdImages(srcs: (string | undefined)[]): void {
-    for (const src of srcs) {
-      if (src) this.cacheAdImage(src);
-    }
-  }
-
-  private adImage(src?: string): HTMLImageElement | undefined {
-    return src ? this._adImageCache.get(src) : undefined;
-  }
-
-  private cacheAdImage(src: string): HTMLImageElement {
-    const cached = this._adImageCache.get(src);
-    if (cached) return cached;
-    const el = new Image();
-    el.crossOrigin = 'anonymous';
-    el.src = src;
-    this._adImageCache.set(src, el);
-    return el;
-  }
-
-  showAdOverlay(mode: AdOverlayMode): void {
-    if (!this._ad || !this._ad.slots?.includes(mode)) return;
-    this._adOverlay = { mode, ad: this._ad, since: performance.now(), endingSince: undefined };
-  }
-
-  getAdHitAt(x: number, y: number): AdHit | null {
-    const overlay = this._adOverlay;
-    if (!overlay || overlay.endingSince !== undefined) return null;
-
-    if (inRect(overlay.closeRect, x, y)) return { type: 'close' };
-
-    const link = overlay.ad.linkUrl;
-    if (link && inRect(overlay.clickRect, x, y)) return { type: 'link', url: link };
-
-    return null;
-  }
-
-  hideAdOverlay(): void {
-    if (this._adOverlay && this._adOverlay.endingSince === undefined) {
-      this._adOverlay.endingSince = performance.now();
-    }
-  }
-
-  private renderAdOverlay(renderParameters: RenderParameters): void {
-    const overlay = this._adOverlay;
-    if (!overlay) return;
-
-    if (overlay.mode === 'result' && !renderParameters.winner) {
-      this.hideAdOverlay();
-    }
-
-    const scale = this._canvas.width / this._sceneCanvas.width;
-    try {
-      this._displayCtx.save();
-      this._displayCtx.scale(scale, scale);
-      const alive = drawAdOverlay(this._displayCtx, this._sceneCanvas.width, this._sceneCanvas.height, overlay, {
-        preroll: this.adImage(overlay.ad.creatives.preroll),
-        result: this.adImage(overlay.ad.creatives.result),
-        qr: this.adImage(overlay.ad.qrImage),
-      });
-      this._displayCtx.restore();
-      if (!alive) this._adOverlay = null;
-    } catch (e) {
-      this._displayCtx.restore();
-      console.error('[ads] 오버레이 렌더링 실패, 이번 노출은 건너뜁니다', e);
-      this._adOverlay = null;
-    }
-  }
-
-  private renderAdBoards(stage: StageDef): void {
-    const ad = this._ad;
-    if (!ad || !ad.slots?.includes('goal') || !stage.adBoards?.length) return;
-
-    const img = this.adImage(ad.creatives.goal);
-    if (!img?.complete || img.naturalWidth === 0) return;
-
-    try {
-      this.ctx.save();
-      for (const board of stage.adBoards) {
-        const w = board.w ?? 4;
-        const h = board.h ?? 1;
-        const x = board.x - w / 2;
-        const y = board.y - h / 2;
-        this.ctx.drawImage(img, x, y, w, h);
-      }
-    } catch (e) {
-      console.error('[ads] 광고판 렌더링 실패, 이번 게재는 건너뜁니다', e);
-      this._ad = null;
-    } finally {
-      this.ctx.restore();
-    }
-  }
 
   render(renderParameters: RenderParameters, uiObjects: UIObject[]) {
     this._theme = renderParameters.theme;
@@ -271,7 +139,6 @@ export class RouletteRenderer {
     this.ctx.font = '0.4pt sans-serif';
     this.ctx.lineWidth = 3 / (renderParameters.camera.zoom + initialZoom);
     renderParameters.camera.renderScene(this.ctx, () => {
-      this.renderAdBoards(renderParameters.stage);
       this.onBeforeEntities();
       this.renderEntities(renderParameters.entities);
       this.renderEffects(renderParameters);
@@ -287,7 +154,6 @@ export class RouletteRenderer {
     this.renderWinner(renderParameters);
 
     this._displayCtx.drawImage(this._sceneCanvas, 0, 0, this._canvas.width, this._canvas.height);
-    this.renderAdOverlay(renderParameters);
   }
 
   private renderEntities(entities: MapEntityState[]) {
