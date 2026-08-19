@@ -122,6 +122,15 @@ export class Box2dPhysics implements IPhysics {
     }
   }
 
+  shakeAll(): void {
+    Object.values(this.marbleMap).forEach((body) => {
+      body.ApplyLinearImpulseToCenter(
+        new this.Box2D.b2Vec2((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12 - 4),
+        true
+      );
+    });
+  }
+
   removeMarble(id: number): void {
     const marble = this.marbleMap[id];
     if (marble) {

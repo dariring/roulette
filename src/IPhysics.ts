@@ -14,6 +14,8 @@ export interface IPhysics {
 
   shakeMarble(id: number): void;
 
+  shakeAll(): void;
+
   removeMarble(id: number): void;
 
   getMarblePosition(id: number): { x: number; y: number; angle: number };

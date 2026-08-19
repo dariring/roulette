@@ -1,4 +1,5 @@
 import type { MapEntity } from '../types/MapEntity.type';
+import { newStages } from './newMaps';
 
 export type AdBoard = {
   x: number;
@@ -15,7 +16,7 @@ export type StageDef = {
   adBoards?: AdBoard[];
 };
 
-export const stages: StageDef[] = [
+const originalStages: StageDef[] = [
   {
     title: 'Wheel of fortune',
     goalY: 111,
@@ -2998,3 +2999,5 @@ export const stages: StageDef[] = [
     ],
   },
 ];
+
+export const stages: StageDef[] = [...originalStages, ...newStages];

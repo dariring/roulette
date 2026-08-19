@@ -16,6 +16,7 @@ import type { RoundAd } from './types/Ad.type';
 import type { ColorTheme } from './types/ColorTheme';
 import type { MouseEventHandlerName, MouseEventName } from './types/mouseEvents.type';
 import type { UIObject } from './UIObject';
+import { soundService } from './soundService';
 import { bound } from './utils/bound.decorator';
 import { parseName, shuffle } from './utils/utils';
 import { VideoRecorder } from './utils/videoRecorder';
@@ -96,10 +97,64 @@ export class Roulette extends EventTarget {
     }
   }
 
+  private _isPaused: boolean = false;
+
+  get isPaused() {
+    return this._isPaused;
+  }
+
+  public togglePause(): boolean {
+    this._isPaused = !this._isPaused;
+    this.dispatchEvent(new CustomEvent('pauseChange', { detail: this._isPaused }));
+    return this._isPaused;
+  }
+
+  public setPause(paused: boolean) {
+    this._isPaused = paused;
+    this.dispatchEvent(new CustomEvent('pauseChange', { detail: this._isPaused }));
+  }
+
+  public shakeAllMarbles() {
+    this.physics.shakeAll();
+    this.dispatchEvent(new CustomEvent('message', { detail: 'Shake!' }));
+  }
+
+  public getLeaderboard(limit = 6) {
+    const list: { rank: number; name: string; hue: number; y: number; isWinner: boolean; finished: boolean }[] = [];
+    this._winners.forEach((w, idx) => {
+      list.push({
+        rank: idx + 1,
+        name: w.name,
+        hue: w.hue,
+        y: w.y,
+        isWinner: idx === this._winnerRank,
+        finished: true,
+      });
+    });
+    this._marbles.forEach((m, idx) => {
+      list.push({
+        rank: idx + 1 + this._winners.length,
+        name: m.name,
+        hue: m.hue,
+        y: m.y,
+        isWinner: false,
+        finished: false,
+      });
+    });
+    return list.slice(0, limit);
+  }
+
   @bound
   private _update() {
     if (!this._lastTime) this._lastTime = Date.now();
     const currentTime = Date.now();
+
+    if (this._isPaused) {
+      this._lastTime = currentTime;
+      this._render();
+      window.requestAnimationFrame(this._update);
+      return;
+    }
 
     this._elapsed += (currentTime - this._lastTime) * this._speed * this.fastForwarder.speed;
     if (this._elapsed > 100) {
@@ -144,11 +199,20 @@ export class Roulette extends EventTarget {
       if (marble.skill === Skills.Impact) {
         this._effects.push(new SkillEffect(marble.x, marble.y));
         this.physics.impact(marble.id);
+        soundService.playSkill();
       }
       if (marble.y > this._stage.goalY) {
         this._winners.push(marble);
+        const isTargetWinner =
+          (this._isRunning && this._winners.length === this._winnerRank + 1) ||
+          (this._isRunning &&
+            this._winnerRank === this._winners.length &&
+            this._winnerRank === this._totalMarbleCount - 1);
+
+        soundService.playGoal();
+
         if (this._isRunning && this._winners.length === this._winnerRank + 1) {
-          this.dispatchEvent(new CustomEvent('goal', { detail: { winner: marble.name } }));
+          this.dispatchEvent(new CustomEvent('goal', { detail: { winner: marble.name, rank: this._winnerRank + 1, marble } }));
           this._winner = marble;
           this._isRunning = false;
           this._particleManager.shot(this._renderer.width, this._renderer.height);
@@ -162,10 +226,10 @@ export class Roulette extends EventTarget {
         ) {
           this.dispatchEvent(
             new CustomEvent('goal', {
-              detail: { winner: this._marbles[i + 1].name },
+              detail: { winner: this._marbles[i + 1]?.name || marble.name, rank: this._winnerRank + 1, marble: this._marbles[i + 1] || marble },
             })
           );
-          this._winner = this._marbles[i + 1];
+          this._winner = this._marbles[i + 1] || marble;
           this._isRunning = false;
           this._particleManager.shot(this._renderer.width, this._renderer.height);
           setTimeout(() => {
@@ -183,7 +247,7 @@ export class Roulette extends EventTarget {
     this._goalDist = Math.abs(this._stage.zoomY - topY);
     this._timeScale = this._calcTimeScale();
 
-    this._marbles = this._marbles.filter((marble) => marble.y <= this._stage?.goalY);
+    this._marbles = this._marbles.filter((marble) => marble.y <= this._stage!.goalY);
   }
 
   private _calcTimeScale(): number {
@@ -468,10 +532,13 @@ export class Roulette extends EventTarget {
   }
 
   public reset() {
+    this._isRunning = false;
+    this._isPaused = false;
     this.clearMarbles();
     this._clearMap();
     this._loadMap();
     this._goalDist = Infinity;
+    this.dispatchEvent(new CustomEvent('reset'));
   }
 
   public getCount() {
